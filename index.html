@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="ml">
+<head>
+  <meta charset="UTF-8" />
+  <title>Stadium Cricket - ബാദുഷ, സിയാ, റിസ</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 12px;
+      background: #070d19;
+      color: #fff;
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      user-select: none;
+    }
+    .topbar {
+      width: 980px;
+      max-width: 100%;
+      background: #132238;
+      padding: 10px 16px;
+      border-radius: 10px;
+      border: 1px solid #2b4c7e;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .score { color: #4ade80; font-weight: bold; font-size: 16px; }
+    select, button {
+      background: #1e3557;
+      color: #fff;
+      border: 1px solid #456ea8;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .hit-btn {
+      background: #16a34a;
+      border-color: #22c55e;
+      padding: 8px 22px;
+      font-size: 15px;
+    }
+    .hit-btn:active { transform: scale(0.96); }
+    canvas {
+      background: #15803d;
+      border: 3px solid #38bdf8;
+      border-radius: 14px;
+      box-shadow: 0 14px 36px rgba(0, 0, 0, 0.65);
+      max-width: 100%;
+      cursor: pointer;
+    }
+    #statusText {
+      font-size: 15px;
+      color: #e2e8f0;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="topbar">
+    <div class="score" id="hud">Runs: 0 | Wickets: 0 | Balls: 0</div>
+    <div>
+      Batter (നീ):
+      <select id="batterSelect" onchange="updateHUD()">
+        <option value="ബാദുഷ">ബാദുഷ</option>
+        <option value="സിയാ">സിയാ</option>
+        <option value="റിസ">റിസ</option>
+      </select>
+      Bowler:
+      <select id="bowlerSelect" onchange="updateHUD()">
+        <option value="റിസ">റിസ</option>
+        <option value="സിയാ">സിയാ</option>
+        <option value="ബാദുഷ">ബാദുഷ</option>
+      </select>
+      <button class="hit-btn" onclick="hitBall()">HIT (Space / Click)</button>
+    </div>
+  </div>
+
+  <canvas id="gameCanvas" width="980" height="560" onclick="hitBall()"></canvas>
+  <div id="statusText">ബൗളർ തയ്യാറെടുക്കുന്നു... ബോൾ അടുത്തെത്തുമ്പോൾ SPACE അല്ലെങ്കിൽ HIT അമർത്തൂ!</div>
+
+  <script>
+    var canvas = document.getElementById("gameCanvas");
+    var ctx = canvas.getContext("2d");
+
+    var runs = 0, wickets = 0, balls = 0, tick = 0;
+    var autoBowlTimer = 60;
+
+    var batter = { x: 490, y: 460, swing: 0 };
+    var bowler = { x: 490, y: 215, startY: 215, running: false };
+    var ball = { active: false, hit: false, x: 490, y: 270, vx: 0, vy: 0, z: 0, vz: 0 };
+
+    // Fielders: റിസ, സിയാ, ബാദുഷാ
+    var fielders = [
+      { name: "റിസ", x: 265, y: 345, bx: 265, by: 345, moving: false },
+      { name: "സിയാ", x: 715, y: 345, bx: 715, by: 345, moving: false },
+      { name: "ബാദുഷാ", x: 490, y: 295, bx: 490, by: 295, moving: false }
+    ];
+
+    // Pre-generate stadium crowd spectators
+    var crowd = [];
+    var shirtColors = ["#ef4444", "#3b82f6", "#facc15", "#ec4899", "#a855f7", "#14b8a6", "#f97316", "#ffffff"];
+    for (var row = 0; row < 4; row++) {
+      for (var col = 0; col < 68; col++) {
+        crowd.push({
+          x: 15 + col * 14 + (row % 2) * 6,
+          y: 26 + row * 18,
+          color: shirtColors[(row * 7 + col * 3) % shirtColors.length],
+          phase: (col * 0.4 + row * 1.1)
+        });
+      }
+    }
+
+    function updateHUD() {
+      var bName = document.getElementById("batterSelect").value;
+      var bwName = document.getElementById("bowlerSelect").value;
+      document.getElementById("hud").innerText = "Runs: " + runs + " | Wickets: " + wickets + " | Balls: " + balls + " (" + bName + " vs " + bwName + ")";
+    }
+
+    function startBowl() {
+      if (bowler.running || ball.active) return;
+      bowler.y = bowler.startY;
+      bowler.running = true;
+      var bwName = document.getElementById("bowlerSelect").value;
+      document.getElementById("statusText").innerText = bwName + " റണ്ണപ്പ് എടുത്ത് ഓടിവരുന്നു...";
+    }
+
+    function releaseBall() {
+      bowler.running = false;
+      ball.active = true;
+      ball.hit = false;
+      ball.x = bowler.x;
+      ball.y = bowler.y + 8;
+      ball.z = 22;
+      ball.vz = -0.6;
+      ball.vx = (Math.random() - 0.5) * 0.7;
+      ball.vy = 5.2;
+      var bwName = document.getElementById("bowlerSelect").value;
+      document.getElementById("statusText").innerText = bwName + " ബോൾ എറിഞ്ഞു! വേഗം HIT / SPACE അമർത്തൂ!";
+    }
+
+    function finishDelivery(delayFrames) {
+      ball.active = false;
+      ball.hit = false;
+      autoBowlTimer = delayFrames || 90;
+    }
+
+    function hitBall() {
+      if (batter.swing === 0) batter.swing = 15;
+      if (!ball.active || ball.hit) return;
+
+      var dy = Math.abs(ball.y - batter.y);
+      var dx = Math.abs(ball.x - batter.x);
+
+      if (dy < 62 && dx < 58) {
+        ball.hit = true;
+        balls++;
+        var timing = Math.max(0.5, 1 - dy / 62);
+        var angle = -Math.PI / 2 + (Math.random() * 2.1 - 1.05);
+        var power = 6.5 + timing * 5.8;
+
+        ball.vx = Math.cos(angle) * power;
+        ball.vy = Math.sin(angle) * power;
+        ball.vz = 3.2 + timing * 3.4;
+
+        var bName = document.getElementById("batterSelect").value;
+        if (timing > 0.84) {
+          runs += 6;
+          document.getElementById("statusText").innerText = "🔥 SIX! " + bName + " തകർപ്പൻ സിക്സ് അടിച്ചു (+6)!";
+        } else if (timing > 0.65) {
+          runs += 4;
+          document.getElementById("statusText").innerText = "🏏 FOUR! " + bName + " ബൗണ്ടറി കടത്തി (+4)!";
+        } else {
+          runs += 1;
+          document.getElementById("statusText").innerText = "🏃 " + bName + " ബോൾ അടിച്ചു! ഫീൽഡർമാർ ബോൾ പിടിക്കാൻ ഓടുന്നു...";
+        }
+        updateHUD();
+      }
+    }
+
+    function drawStadiumBackground() {
+      // Upper stadium stand
+      ctx.fillStyle = "#1e293b";
+      ctx.fillRect(0, 0, canvas.width, 115);
+
+      // Advertising boards along stadium wall
+      var adColors = ["#dc2626", "#2563eb", "#d97706", "#059669"];
+      for (var a = 0; a < 8; a++) {
+        ctx.fillStyle = adColors[a % adColors.length];
+        ctx.fillRect(a * 125 + 6, 102, 114, 16);
+      }
+
+      // Crowd spectators cheering
+      for (var i = 0; i < crowd.length; i++) {
+        var c = crowd[i];
+        var cheer = Math.sin(tick * 0.12 + c.phase) * 3;
+
+        // Spectator body
+        ctx.fillStyle = c.color;
+        ctx.fillRect(c.x - 4, c.y + cheer, 8, 9);
+
+        // Spectator head
+        ctx.fillStyle = "#f1c27d";
+        ctx.beginPath();
+        ctx.arc(c.x, c.y - 3 + cheer, 3.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Stadium Floodlight Towers (Left & Right)
+      drawFloodlight(55, 18);
+      drawFloodlight(925, 18);
+
+      // Main green outfield
+      var grassGrad = ctx.createLinearGradient(0, 118, 0, canvas.height);
+      grassGrad.addColorStop(0, "#15803d");
+      grassGrad.addColorStop(0.5, "#16a34a");
+      grassGrad.addColorStop(1, "#15803d");
+      ctx.fillStyle = grassGrad;
+      ctx.fillRect(0, 118, canvas.width, canvas.height - 118);
+
+      // Subtle mown grass stripes
+      ctx.fillStyle = "rgba(255, 255, 255, 0.05)";
+      for (var s = 125; s < canvas.height; s += 38) {
+        ctx.fillRect(0, s, canvas.width, 19);
+      }
+
+      // Boundary Rope
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.ellipse(490, 345, 455, 198, 0, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // 30-yard circle
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([7, 6]);
+      ctx.beginPath();
+      ctx.ellipse(490, 345, 250, 125, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Pitch (Trapezoid)
+      ctx.fillStyle = "#e3be88";
+      ctx.beginPath();
+      ctx.moveTo(462, 260);
+      ctx.lineTo(518, 260);
+      ctx.lineTo(536, 485);
+      ctx.lineTo(444, 485);
+      ctx.closePath();
+      ctx.fill();
+
+      // Pitch crease lines
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(458, 274); ctx.lineTo(522, 274);
+      ctx.moveTo(446, 464); ctx.lineTo(534, 464);
+      ctx.stroke();
+
+      // Stumps
+      ctx.fillStyle = "#fef08a";
+      for (var st = -6; st <= 6; st += 6) {
+        ctx.fillRect(490 + st - 1.5, 252, 3, 14);
+        ctx.fillRect(490 + st * 1.25 - 1.5, 458, 3, 18);
+      }
+    }
+
+    function drawFloodlight(x, y) {
+      ctx.fillStyle = "#334155";
+      ctx.fillRect(x - 4, y + 18, 8, 65);
+      ctx.fillStyle = "#f8fafc";
+      ctx.fillRect(x - 16, y, 32, 20);
+      ctx.fillStyle = "#fef08a";
+      for (var r = 0; r < 2; r++) {
+        for (var c = 0; c < 4; c++) {
+          ctx.fillRect(x - 13 + c * 7, y + 3 + r * 7, 5, 5);
+        }
+      }
+    }
+
+    function drawHuman(x, y, scale, shirt, pants, name, role, swing, runTick, helmet) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(scale, scale);
+
+      // Shadow
+      ctx.fillStyle = "rgba(0,0,0,0.35)";
+      ctx.beginPath();
+      ctx.ellipse(0, 5, 15, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Legs
+      var step = Math.sin(runTick) * 7;
+      ctx.strokeStyle = pants;
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(-5, -16); ctx.lineTo(-7, step);
+      ctx.moveTo(5, -16);  ctx.lineTo(7, -step);
+      ctx.stroke();
+
+      // Shirt
+      ctx.fillStyle = shirt;
+      ctx.fillRect(-10, -38, 20, 23);
+
+      // Head / Helmet
+      ctx.fillStyle = helmet ? "#1d4ed8" : "#f1c27d";
+      ctx.beginPath();
+      ctx.arc(0, -47, 8, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Arms & Bat
+      ctx.strokeStyle = shirt;
+      ctx.lineWidth = 5;
+      if (role === "batter") {
+        ctx.save();
+        ctx.translate(0, -30);
+        var ang = swing > 0 ? -1.4 + (15 - swing) * 0.18 : 0.45;
+        ctx.rotate(ang);
+        ctx.beginPath();
+        ctx.moveTo(-5, 0); ctx.lineTo(8, 6);
+        ctx.moveTo(5, 0);  ctx.lineTo(8, 6);
+        ctx.stroke();
+
+        ctx.fillStyle = "#78350f";
+        ctx.fillRect(5, 6, 8, 28);
+        ctx.restore();
+      } else if (role === "bowler") {
+        ctx.save();
+        ctx.translate(9, -32);
+        ctx.rotate(runTick * 1.4);
+        ctx.beginPath();
+        ctx.moveTo(0, 0); ctx.lineTo(0, -16);
+        ctx.stroke();
+        ctx.restore();
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(-9, -32); ctx.lineTo(-14, -20);
+        ctx.moveTo(9, -32);  ctx.lineTo(14, -20);
+        ctx.stroke();
+      }
+
+      ctx.restore();
+
+      // Name label
+      ctx.font = "bold 13px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "rgba(0,0,0,0.78)";
+      ctx.fillRect(x - 42, y - 72 * scale, 84, 18);
+      ctx.fillStyle = "#fff";
+      ctx.fillText(name, x, y - 58 * scale);
+    }
+
+    function loop() {
+      tick++;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      drawStadiumBackground();
+
+      // Auto-bowl countdown when idle
+      if (!bowler.running && !ball.active) {
+        if (autoBowlTimer > 0) {
+          autoBowlTimer--;
+        } else {
+          startBowl();
+        }
+      }
+
+      // Update Bowler
+      if (bowler.running) {
+        bowler.y += 2.5;
+        if (bowler.y >= 262) releaseBall();
+      } else {
+        bowler.y += (bowler.startY - bowler.y) * 0.06;
+      }
+
+      if (batter.swing > 0) batter.swing--;
+
+      // Update Ball & Fielders
+      if (ball.active) {
+        ball.x += ball.vx;
+        ball.y += ball.vy;
+        ball.z += ball.vz;
+        ball.vz -= 0.16;
+        if (ball.z < 0) { ball.z = 0; ball.vz = Math.abs(ball.vz) * 0.5; }
+
+        if (ball.hit) {
+          for (var i = 0; i < fielders.length; i++) {
+            var f = fielders[i];
+            var d = Math.hypot(ball.x - f.x, ball.y - f.y);
+            if (d < 420) {
+              f.moving = true;
+              f.x += ((ball.x - f.x) / d) * 3.2;
+              f.y += ((ball.y - f.y) / d) * 3.2;
+            } else {
+              f.moving = false;
+            }
+
+            // Fielder catches or stops ball
+            if (d < 24 && ball.z < 22) {
+              if (ball.z > 4) {
+                wickets++;
+                document.getElementById("statusText").innerText = "🙌 CATCH OUT! " + f.name + " ബോൾ ഓടിപ്പിടിച്ചു ഔട്ട് ആക്കി!";
+                updateHUD();
+              } else {
+                document.getElementById("statusText").innerText = "🧤 " + f.name + " ഓടിപ്പോയി ബോൾ പിടിച്ചു തടഞ്ഞു!";
+              }
+              finishDelivery(100);
+              break;
+            }
+          }
+
+          if (ball.active && (ball.x < 35 || ball.x > 945 || ball.y < 125 || ball.y > 535)) {
+            finishDelivery(95);
+          }
+        } else if (ball.y > batter.y + 18) {
+          balls++;
+          wickets++;
+          document.getElementById("statusText").innerText = "💥 BOWLED! സ്റ്റമ്പ് തെറിച്ചു — ഔട്ട് ആയി!";
+          updateHUD();
+          finishDelivery(100);
+        }
+      } else {
+        // Return fielders smoothly to fielding positions
+        for (var j = 0; j < fielders.length; j++) {
+          var flObj = fielders[j];
+          var distHome = Math.hypot(flObj.bx - flObj.x, flObj.by - flObj.y);
+          flObj.moving = distHome > 2;
+          flObj.x += (flObj.bx - flObj.x) * 0.06;
+          flObj.y += (flObj.by - flObj.y) * 0.06;
+        }
+      }
+
+      // Draw Players
+      var bwName = document.getElementById("bowlerSelect").value;
+      var bName = document.getElementById("batterSelect").value;
+
+      drawHuman(bowler.x, bowler.y, 0.9, "#ef4444", "#fff", bwName, "bowler", 0, bowler.running ? tick * 0.35 : 0, false);
+
+      for (var k = 0; k < fielders.length; k++) {
+        var fl = fielders[k];
+        drawHuman(fl.x, fl.y, 0.92, "#2563eb", "#1e293b", fl.name, "fielder", 0, fl.moving ? tick * 0.38 : 0, false);
+      }
+
+      if (ball.active) {
+        ctx.fillStyle = "rgba(0,0,0,0.35)";
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#dc2626";
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y - ball.z, 7, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      drawHuman(batter.x, batter.y, 1.2, "#facc15", "#1e3a8a", bName, "batter", batter.swing, 0, true);
+
+      requestAnimationFrame(loop);
+    }
+
+    window.addEventListener("keydown", function(e) {
+      if (e.code === "Space") { e.preventDefault(); hitBall(); }
+    });
+
+    updateHUD();
+    loop();
+  </script>
+</body>
+</html>
